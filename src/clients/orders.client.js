@@ -13,6 +13,16 @@ export const ordersClient = {
     return { status: res.status, body: await res.json() };
   },
 
+  // Sends rawText exactly as given (for malformed-body tests).
+  async createRaw(rawText) {
+    const res = await fetch(`${BASE_URL}/api/orders`, {
+      method: "POST",
+      headers: json,
+      body: rawText,
+    });
+    return { status: res.status, body: await res.json() };
+  },
+
   async get(id) {
     const res = await fetch(`${BASE_URL}/api/orders/${id}`);
     return { status: res.status, body: await res.json() };
