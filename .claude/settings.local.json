@@ -1,0 +1,6 @@
+{
+  "enabledMcpjsonServers": [
+    "orders-api",
+    "github"
+  ]
+}
