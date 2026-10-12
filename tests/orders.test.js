@@ -13,6 +13,7 @@ import {
   multiItemOrderItems,
   clientSuppliedServerFields,
   emptyOrder,
+  unknownOrderId,
 } from "../src/data/fixtures.js";
 
 const TIMEOUT = { timeout: 60000 }; // Render cold starts
@@ -25,7 +26,10 @@ function assertValidationFailed({ status, body }) {
   assert.equal(body.error, "validation_failed");
   assert.ok(Array.isArray(body.violations));
   assert.ok(body.violations.length > 0);
-  assert.ok(body.violations.every((v) => v.hint), "every violation has a hint");
+  assert.ok(
+    body.violations.every((v) => typeof v.hint === "string" && v.hint.length > 0),
+    "every violation has a hint",
+  );
   return body.violations;
 }
 
@@ -82,11 +86,37 @@ test("accepts DELIVERY as the fulfillment method", TIMEOUT, async () => {
   assert.equal(body.totalCents, menuPriceCents.burrito);
 });
 
-test("does not change totalCents when the size is LARGE", TIMEOUT, async () => {
-  const { status, body } = await ordersClient.create(anOrder().withSize("LARGE").build());
+for (const size of orderSizes) {
+  // Documents current behaviour: size does not affect price (open product question).
+  test(`does not change totalCents when the size is ${size}`, TIMEOUT, async () => {
+    const { status, body } = await ordersClient.create(anOrder().withSize(size).build());
+    assert.equal(status, 201);
+    assert.equal(body.items[0].size, size);
+    assert.equal(body.totalCents, menuPriceCents.burrito);
+  });
+}
+
+for (const id of menuItemIds) {
+  test(`prices an order of ${id} at its menu price`, TIMEOUT, async () => {
+    const { status, body } = await ordersClient.create(anOrder().withMenuItemId(id).build());
+    assert.equal(status, 201);
+    assert.equal(body.items[0].menuItemId, id);
+    assert.equal(body.totalCents, menuPriceCents[id]);
+  });
+}
+
+test("multiplies the item price by a large quantity", TIMEOUT, async () => {
+  const { status, body } = await ordersClient.create(anOrder().withQuantity(100).build());
   assert.equal(status, 201);
-  assert.equal(body.items[0].size, "LARGE");
-  assert.equal(body.totalCents, menuPriceCents.burrito);
+  assert.equal(body.items[0].quantity, 100);
+  assert.equal(body.totalCents, menuPriceCents.burrito * 100);
+});
+
+test("returns 404 not_found for an order id that does not exist", TIMEOUT, async () => {
+  const { status, body } = await ordersClient.get(unknownOrderId);
+  assert.equal(status, 404);
+  assert.equal(body.error, "not_found");
+  assert.ok(body.message.includes(unknownOrderId));
 });
 
 test("rejects a lowercase, non-enum size with 422", TIMEOUT, async () => {
@@ -125,6 +155,36 @@ test("rejects a zero quantity with 422", TIMEOUT, async () => {
   const res = await ordersClient.create(anOrder().withQuantity(0).build());
   const v = violationFor(assertValidationFailed(res), "items[0].quantity");
   assert.equal(v.code, "out_of_range");
+});
+
+test("rejects a negative quantity with 422", TIMEOUT, async () => {
+  const res = await ordersClient.create(anOrder().withQuantity(-1).build());
+  const v = violationFor(assertValidationFailed(res), "items[0].quantity");
+  assert.equal(v.code, "out_of_range");
+});
+
+test("states the expected and received values in a quantity violation", TIMEOUT, async () => {
+  const res = await ordersClient.create(anOrder().withQuantity(0).build());
+  const v = violationFor(assertValidationFailed(res), "items[0].quantity");
+  assert.equal(v.expected, "integer >= 1");
+  assert.equal(v.received, "0");
+});
+
+// Missing nested fields are reported with the field's own rule code, not
+// "required" as for a missing top-level customerId (possible API inconsistency).
+test("reports missing fulfillment fields at their nested paths", TIMEOUT, async () => {
+  const res = await ordersClient.create(anOrder().withFulfillment({}).build());
+  const violations = assertValidationFailed(res);
+  assert.equal(violationFor(violations, "fulfillment.method").code, "unknown_value");
+  assert.equal(violationFor(violations, "fulfillment.scheduledFor").code, "invalid_format");
+});
+
+test("reports missing item fields at their nested paths", TIMEOUT, async () => {
+  const res = await ordersClient.create(anOrder().withItems([{}]).build());
+  const violations = assertValidationFailed(res);
+  assert.equal(violationFor(violations, "items[0].menuItemId").code, "unknown_value");
+  assert.equal(violationFor(violations, "items[0].quantity").code, "out_of_range");
+  assert.equal(violationFor(violations, "items[0].size").code, "unknown_value");
 });
 
 test("rejects an unknown fulfillment method with 422", TIMEOUT, async () => {

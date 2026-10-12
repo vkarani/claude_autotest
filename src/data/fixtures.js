@@ -1,9 +1,15 @@
 // Canonical payloads, defined once and reused across tests.
 
+// One week ahead, computed once per run so the default order is never
+// scheduled in the past (whether the API should reject past dates is undecided).
+export const scheduledForNextWeek = new Date(
+  Date.now() + 7 * 24 * 60 * 60 * 1000,
+).toISOString();
+
 export const validOrder = {
   customerId: "cus_demo",
   items: [{ menuItemId: "burrito", quantity: 1, size: "REGULAR" }],
-  fulfillment: { method: "PICKUP", scheduledFor: "2026-08-20T18:30:00.000Z" },
+  fulfillment: { method: "PICKUP", scheduledFor: scheduledForNextWeek },
 };
 
 // Looks fine, breaks two rules on purpose (used for the 422 tests):
@@ -55,3 +61,6 @@ export const clientSuppliedServerFields = {
 
 // Empty body: every required field is missing.
 export const emptyOrder = {};
+
+// An order id that is well-formed but never issued.
+export const unknownOrderId = "ord_does_not_exist";
